@@ -1,0 +1,252 @@
+---
+title: 'Case Study:  How Does a Bike-Share Navigate Speedy Success?'
+author: "Said Boutejdir."
+date: "20/12/2021"
+output: html_document
+---
+
+```{r Loading needed libraries for our study case...}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## 1.	Identifying the business task.
+
+Delve into bike-share data and discover **how do annual members and casual riders use Cyclistic bikes differently**, which will help Stakeholders design marketing strategies based on digital media to convert casual riders **if they are resulting less profitable** than members riders.
+
+## 2.	Describing the used data sources.
+
+Cyclistic’s historical trip data source used in this analysis project is a **public data** containing the previous 12 months of Cyclistic trip data (starting from December 2020 up to November 2021) made available by Motivate International Inc. under this [license](https://www.divvybikes.com/data-license-agreement). The data is openly reachable by the current [link](https://divvy-tripdata.s3.amazonaws.com/index.html).
+The data source is presented in 12 csv files, every single file is containing all trip activities for a given month, covering values of 13 attributes listed below over the whole month.
+
+*ride_id: Trip identificator
+*rideable_type: Bike type (Classic, Electric or Docked)
+*started_at: Trip starting time
+*ended_at: Trip ending time.
+*start_station_name: Ride starting station name
+*start_station_id: Ride starting station identificator
+*end_station_name: Ride ending station name
+*end_station_id: Ride ending station identificatory
+*start_lat: Ride starting latitude coordinate
+*start_lng: Ride starting longitude coordinate
+*end_lat: Ride ending latitude coordinate
+*end_lng: Ride ending longitude coordinate
+*member_casual: Category of the rider (Member or Casual)
+
+### Taking the first look on the data.
+As a starting step, we will just analyse the first file (202012) and try to extract and plot the most important values from it.
+
+```{r load data}
+Bike_trips_df <- read.csv("data/zip/202012-divvy-tripdata.csv")
+glimpse(Bike_trips_df)
+```
+
+### Getting some valuable evidence from the data and inspecting for bias and trustworthiness.
+
+By now, we are familiar with this data set, and we know that it contains 13 attributes or column names that we can inspect deeper, first we will try to check for the data integrity and credibility, and then we will try to filter out any ineffective values.
+
+
+```{r Check for NULLs OR / AND NA, duplicate and bad values }
+Bike_trips_df_v2 = na.omit(Bike_trips_df)
+distinct(Bike_trips_df_v2)
+glimpse(Bike_trips_df_v2)
+Bike_trips_df_v2  %>%
+  summarize(min_rider_id = min(nchar(ride_id)), 
+            max_rider_id = max(nchar(ride_id)), 
+            min_start_lat = min(start_lat), 
+            max_start_lat = max(start_lat), 
+            max_end_lat = max(end_lat), 
+            min_end_lat = min(end_lat),
+            min_start_lng = min(start_lng), 
+            max_start_lng = max(start_lng),
+            max_end_lng = max(end_lng), 
+            min_end_lng = min(end_lng) )
+```
+
+After inspecting the values and searching for outliers and bias, we must check the credibility of data and remove all rows in which the round trip duration is less than 1 minute (60 seconds) or containing wrong data like the starting time (started_at) later than ending trip time (ended_at) which is not possible!!.
+
+```{r filtering the dataset : removing the wrong rows (bias or credibility)}
+Bike_trips_df_v3 <- Bike_trips_df %>%
+        filter(as.duration( ymd_hms(ended_at)-ymd_hms(started_at)) >= 60 ) %>%
+        mutate(ride_length = as.duration(ymd_hms(ended_at)-ymd_hms(started_at)),
+               day_of_week = wday(started_at)
+               )  
+
+Bike_trips_df_v3  %>%  
+  group_by(member_casual,day_of_week) %>%  
+  summarize(sum_trip_seconds = sum(ride_length) , 
+            average_trip_time = mean(ride_length) / 60, 
+            max_ride_lenght = max(ride_length), 
+            number_rows = n_distinct(ride_id) ,
+            .groups = 'drop') %>%
+  arrange(desc(number_rows))
+
+mode_day_member_df <- Bike_trips_df_v3 %>% 
+  filter(member_casual == "member") %>%
+  select(day_of_week) 
+
+mode_day_casual_df <- Bike_trips_df_v3 %>% 
+  filter(member_casual == "casual") %>%
+  select(day_of_week) 
+
+getmode <- function(v) {
+    uniqv <- unique(v)
+    uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+mode_dw_memeber <- getmode(mode_day_member_df$day_of_week)
+mode_dw_casual <- getmode(mode_day_casual_df$day_of_week)
+#print(c(mode_dw_casual, mode_dw_memeber))
+
+
+Bike_trips_df_v3  %>%  
+  group_by(rideable_type, member_casual) %>%  
+  summarize(sum_trip_seconds = sum(ride_length) , 
+            average_trip_time = mean(ride_length) / 60, 
+            max_ride_lenght = max(ride_length), 
+            number_rows = n_distinct(ride_id) ,
+            .groups = 'drop') %>%
+  arrange(desc(max_ride_lenght),rideable_type, desc(member_casual))
+
+```
+
+### Visualising some keys values of our data
+With our findings, we can try to plot some graph in other to get a big picture of our current data.
+
+```{r Ploting our findings - Ride duration for Members and casuals }
+mindate <- min(Bike_trips_df$started_at)
+maxdate <- max(Bike_trips_df$ended_at)
+Bike_trips_df_Plot <- Bike_trips_df_v3  %>%  
+  group_by(rideable_type, member_casual) %>%  
+  summarize(sum_trip_seconds = sum(ride_length) / 3600, 
+            average_trip_time = mean(ride_length) / 60, 
+            number_rows = n_distinct(ride_id) ,
+            .groups = 'drop') %>%
+  arrange(rideable_type, desc(member_casual))
+
+ggplot(Bike_trips_df_Plot) +
+    geom_bar(mapping= aes(x=rideable_type, y=sum_trip_seconds, fill=rideable_type), stat='identity', width=0.7) +
+    facet_wrap(~member_casual) +
+    theme(axis.text.x = element_text(angle = 35)) +
+    labs(title="Bike Trip Duration - Mambers Vs Casuals",
+        subtitle=paste0("Data from: ", date(mindate), " to ", date(maxdate)) ,
+        x="Bike Type",
+        y="Total Trip Duration (x Hours)")
+
+```
+Ploting the Average trip duration in minutes for members and casuals.
+
+```{r Ploting our findings - Ride duration average for Members and casuals }
+ggplot(Bike_trips_df_Plot) +
+    geom_bar(mapping= aes(x=rideable_type, y=average_trip_time, fill=rideable_type), stat='identity', width=0.7) +
+    facet_wrap(~member_casual) +
+    theme(axis.text.x = element_text(angle = 35)) +
+    labs(title="Bike Trip Duration Average - Mambers Vs Casuals",
+        subtitle=paste0("Data from: ", date(mindate), " to ", date(maxdate)) ,
+        x="Bike Type",
+        y="Average Trip Duration (in Minutes)")
+
+```
+
+
+Ploting the total trip duration in hours for members and casuals.
+
+```{r}
+ggplot(Bike_trips_df_v3) +
+    geom_bar(mapping= aes(x = member_casual, y=ride_length/3600, fill=rideable_type), stat = 'identity', width = 0.7) +
+    theme(axis.text.x = element_text(face="bold")) +
+    labs(title="Total Trip Duration - Mambers Vs Casuals",
+        subtitle=paste0("Data from: ", date(mindate), " to ", date(maxdate)) ,
+        x="Rider Category",
+        y="Total Trip Duration (x Hours)")
+
+```
+### Summarizing the whole data source. (merging the 12 files)
+After having a look at every csv file and examining its content, we by now, will try to analyse the whole data source extracting and plotting the most important values from it.
+
+```{r}
+files <- list.files(path = "./Data/Zip/", pattern = "*.csv")
+df <- files %>% 
+  map(function(x) {
+    read.csv(paste0("./Data/Zip/", x))
+  }) %>%
+  reduce(rbind)
+
+glimpse(df)
+
+```
+### Getting some valuable evidence from the data and inspecting for bias and trustworthiness.
+
+By now, we are familiar with this data set, and we know that it contains 13 attributes or column names that we can inspect deeper, first we will try to check for the data integrity and credibility, and then we will try to filter out any ineffective values.
+
+
+```{r Check for NULLs / NA, duplicate and bad values }
+df_v2 = na.omit(df)
+df_v2  %>%
+  summarize(min_rider_id = min(nchar(ride_id)), 
+            max_rider_id = max(nchar(ride_id)), 
+            min_start_lat = min(start_lat), 
+            max_start_lat = max(start_lat), 
+            max_end_lat = max(end_lat), 
+            min_end_lat = min(end_lat),
+            min_start_lng = min(start_lng), 
+            max_start_lng = max(start_lng),
+            max_end_lng = max(end_lng), 
+            min_end_lng = min(end_lng) )
+```
+
+After inspecting the values and searching for outliers and bias, we must check the credibility of the whole data and remove all rows in which the round trip duration is less than 1 minute (60 seconds) or containing wrong data like the starting time (started_at) later than ending trip time (ended_at) which is not possible!!.
+
+```{r filtering our dataset using the pipe to remove the wrong rows (bias or credibility)}
+df_v3 <- df %>%
+        filter(as.duration( ymd_hms(ended_at)-ymd_hms(started_at)) >= 60 ) %>%
+        mutate(trip_duration = as.duration(ymd_hms(ended_at)-ymd_hms(started_at)))  
+
+df_v3  %>%  
+  group_by(rideable_type, member_casual) %>%  
+  summarize(sum_trip_seconds = sum(trip_duration) , 
+            average_trip_time = mean(trip_duration) / 60, 
+            number_rows = n_distinct(ride_id) ,
+            .groups = 'drop') %>%
+  arrange(rideable_type, desc(member_casual))
+```
+
+Ploting the total trip duration in hours for members and casuals.
+
+```{r}
+mindate <- min(df$started_at)
+maxdate <- max(df$ended_at)
+ggplot(df_v3) +
+    geom_bar(mapping= aes(x = member_casual, y=trip_duration/3600000, fill=rideable_type), stat = 'identity', width = 0.7) +
+    theme(axis.text.x = element_text(face="bold")) +
+    labs(title="Total Trip Duration - Mambers Vs Casuals",
+        subtitle=paste0("Data from: ", mindate, " to ", maxdate) ,
+        x="Rider Category",
+        y="Total Trip Duration (Hours x 1000)")
+
+```
+
+### Visualising some keys values of our data
+With our findings, we can try to plot some graph in other to get a big picture of our current data source.
+
+```{r Plotting our results}
+df_Plot <- df_v3  %>%  
+  group_by(rideable_type, member_casual) %>%  
+  summarize(sum_trip_seconds = sum(trip_duration) / 3600000, 
+            average_trip_time = mean(trip_duration) / 60, 
+            number_rows = n_distinct(ride_id) ,
+            .groups = 'drop') %>%
+  arrange(rideable_type, desc(member_casual))
+
+ggplot(df_Plot) +
+    geom_bar(mapping= aes(x=rideable_type, y=sum_trip_seconds, fill=rideable_type), stat='identity', width=0.7) +
+    facet_wrap(~member_casual) +
+    theme(axis.text.x = element_text(angle = 35)) +
+    labs(title="Bike Trip Duration - Mambers Vs Casuals",
+        subtitle=paste0("Data from: ", mindate, " to ", maxdate) ,
+        x="Bike Type",
+        y="Total Trip Duration (Hours x 1000)")
+
+```
+
+
